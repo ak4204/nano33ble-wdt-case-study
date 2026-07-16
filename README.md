@@ -147,19 +147,12 @@ nano33ble-wdt-case-study/
 ├── WDT_Nano33BLE/
 │   └── WDT_Nano33BLE.ino   ← Arduino sketch (main demo)
 ├── docs/
-│   └── case_study.tex       ← LaTeX write-up (compile with pdfLaTeX / Overleaf)
-├── media/                   ← Screenshots & demo video (add your own)
+│   └── case_study.tex       ← Case study write-up
+├── media/
 │   └── .gitkeep
 ├── README.md
 └── LICENSE                  ← MIT License
 ```
-
----
-
-## 📄 Documentation & Media
-
-📄 **Full write-up:** [`docs/case_study.pdf`](docs/case_study.tex) *(compile the `.tex` file with pdfLaTeX or upload to [Overleaf](https://overleaf.com))*  
-🎥 **Demo video:** [ADD LINK HERE]
 
 ---
 
