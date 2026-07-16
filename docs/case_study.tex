@@ -1,0 +1,492 @@
+% =============================================================================
+%  Case Study: Watchdog Timer (WDT) on Arduino Nano 33 BLE Sense (nRF52840)
+%  Author : Akanksh Batra
+%  Year   : 2026
+%  Compile: pdfLaTeX (Overleaf compatible)
+% =============================================================================
+
+\documentclass[12pt, a4paper]{article}
+
+% ── Packages ─────────────────────────────────────────────────────────────────
+\usepackage[top=2.5cm, bottom=2.5cm, left=2.5cm, right=2.5cm]{geometry}
+\usepackage{fontenc}
+\usepackage{inputenc}
+\usepackage{microtype}
+\usepackage{parskip}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{enumitem}
+
+% Code listings
+\usepackage{listings}
+\definecolor{codebg}{RGB}{245,245,245}
+\definecolor{codeframe}{RGB}{200,200,200}
+\definecolor{keywordcolor}{RGB}{0,0,180}
+\definecolor{commentcolor}{RGB}{60,128,49}
+\definecolor{stringcolor}{RGB}{163,21,21}
+
+\lstdefinestyle{arduino}{
+  language        = C++,
+  backgroundcolor = \color{codebg},
+  frame           = single,
+  rulecolor       = \color{codeframe},
+  basicstyle      = \ttfamily\small,
+  keywordstyle    = \color{keywordcolor}\bfseries,
+  commentstyle    = \color{commentcolor}\itshape,
+  stringstyle     = \color{stringcolor},
+  numberstyle     = \tiny\color{gray},
+  numbers         = left,
+  numbersep       = 8pt,
+  stepnumber      = 1,
+  breaklines      = true,
+  breakatwhitespace = true,
+  captionpos      = b,
+  tabsize         = 2,
+  showstringspaces= false,
+  morekeywords    = {uint32_t, bool, void, pinMode, digitalWrite,
+                     delay, Serial, HIGH, LOW, OUTPUT, millis,
+                     NRF_WDT, NRF_POWER, WDT_CONFIG_HALT_Pause,
+                     WDT_CONFIG_HALT_Pos, WDT_CONFIG_SLEEP_Run,
+                     WDT_CONFIG_SLEEP_Pos, WDT_RREN_RR0_Msk,
+                     WDT_RR_RR_Reload, POWER_RESETREAS_DOG_Msk},
+}
+\lstset{style=arduino}
+
+% Headers / Footers
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{\small Akanksh Batra}
+\lhead{\small WDT Case Study — Arduino Nano 33 BLE Sense}
+\cfoot{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% Hyperlinks (load last)
+\usepackage[
+  colorlinks = true,
+  linkcolor  = blue!70!black,
+  urlcolor   = blue!70!black,
+  citecolor  = blue!70!black,
+  pdftitle   = {WDT Case Study — Arduino Nano 33 BLE Sense},
+  pdfauthor  = {Akanksh Batra},
+]{hyperref}
+
+% ── Title ────────────────────────────────────────────────────────────────────
+\title{%
+  \textbf{Watchdog Timer (WDT) Case Study}\\[4pt]
+  \large Arduino Nano 33 BLE Sense --- nRF52840 SoC\\[2pt]
+  \normalsize Bare-Metal Register Programming in Arduino IDE
+}
+\author{Akanksh Batra}
+\date{2026}
+
+% =============================================================================
+\begin{document}
+% =============================================================================
+
+\maketitle
+\thispagestyle{fancy}
+
+\begin{abstract}
+This case study documents the configuration and experimental verification of
+the hardware Watchdog Timer (WDT) peripheral on the Nordic Semiconductor
+nRF52840 System-on-Chip, as deployed on the Arduino Nano 33 BLE Sense
+development board. A complete Arduino sketch is presented that (a) programs
+the WDT via bare-metal register access, (b) deliberately simulates a firmware
+hang after a fixed number of successful WDT feeds, (c) allows the WDT to
+trigger an autonomous system reset, and (d) confirms the watchdog reset on
+reboot by inspecting the \texttt{POWER→RESETREAS} register. Observed Serial
+Monitor output and LED behaviour are reported, and the practical implications
+for robust embedded firmware design are discussed.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Objective}
+% ─────────────────────────────────────────────────────────────────────────────
+
+The primary objective of this case study is to:
+
+\begin{enumerate}[label=\arabic*.]
+  \item Understand the architectural role of a hardware Watchdog Timer in
+        embedded systems.
+  \item Configure the nRF52840 WDT peripheral using bare-metal C++ register
+        writes inside the Arduino IDE environment.
+  \item Observe and verify the automatic recovery behaviour when the WDT timeout
+        expires due to a simulated firmware lockup.
+  \item Demonstrate how to distinguish a WDT-induced reset from other reset
+        sources using the \texttt{POWER→RESETREAS} register.
+\end{enumerate}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Introduction}
+% ─────────────────────────────────────────────────────────────────────────────
+
+Embedded systems deployed in unattended or safety-critical environments must
+be capable of recovering autonomously from software faults such as infinite
+loops, deadlocks, or stack overflows. A \textbf{Watchdog Timer (WDT)} is a
+hardware peripheral that fulfils this requirement: it maintains an independent
+countdown timer that triggers a system reset unless the application
+periodically reloads (``feeds'' or ``pets'') it within a programmed deadline.
+
+The Nordic Semiconductor nRF52840, the SoC at the heart of the Arduino Nano 33
+BLE Sense, features a dedicated WDT peripheral clocked by the 32.768\,kHz
+Low-Frequency Clock (LFCLK). This clock source is independent of the CPU and
+peripheral bus clocks, ensuring that the WDT continues to operate even when the
+main system is locked up. Once started, the nRF52840 WDT \emph{cannot be
+stopped without a device reset}, providing a strong safety guarantee.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Hardware and Software Requirements}
+% ─────────────────────────────────────────────────────────────────────────────
+
+\subsection{Hardware}
+
+\begin{table}[h!]
+  \centering
+  \begin{tabular}{>{\bfseries}p{4cm} p{9cm}}
+    \toprule
+    Component       & Details \\
+    \midrule
+    Development Board & Arduino Nano 33 BLE Sense (Rev1 or Rev2) \\
+    SoC               & Nordic Semiconductor nRF52840
+                        (64\,MHz Cortex-M4F, 1\,MB Flash, 256\,kB RAM) \\
+    Connection        & USB-A to Micro-USB cable (power + Serial CDC) \\
+    \bottomrule
+  \end{tabular}
+  \caption{Hardware components used in this case study.}
+\end{table}
+
+\subsection{Software}
+
+\begin{table}[h!]
+  \centering
+  \begin{tabular}{>{\bfseries}p{4cm} p{9cm}}
+    \toprule
+    Tool              & Version / Details \\
+    \midrule
+    Arduino IDE       & 2.x (tested on 2.3+) \\
+    Board Package     & Arduino Mbed OS Nano Boards $\geq$ 4.0.0 \\
+    Header            & \texttt{<nrf.h>} (bundled with core) \\
+    Serial Monitor    & 115\,200 baud, Newline line-ending \\
+    \bottomrule
+  \end{tabular}
+  \caption{Software environment for this case study.}
+\end{table}
+
+No external libraries are required. Direct register access is provided by the
+\texttt{<nrf.h>} CMSIS header shipped with the Mbed OS core.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Working Principle of the nRF52840 WDT}
+% ─────────────────────────────────────────────────────────────────────────────
+
+\subsection{Clock Source and Timeout Formula}
+
+The WDT peripheral is driven by the 32.768\,kHz LFCLK oscillator. The
+\textbf{Counter Reload Value (CRV)} register programs the timeout period
+according to:
+
+\[
+  \text{CRV} = \frac{T_{\mathrm{timeout}}[\mathrm{ms}] \times 32{,}768}{1000}
+\]
+
+For a 3-second timeout:
+\[
+  \text{CRV} = \frac{3000 \times 32{,}768}{1000} = 98{,}304
+\]
+
+\subsection{Key Registers}
+
+\begin{table}[h!]
+  \centering
+  \begin{tabular}{>{\ttfamily}l p{9cm}}
+    \toprule
+    \textrm{Register}           & Description \\
+    \midrule
+    NRF\_WDT->CONFIG            & Controls WDT behaviour during CPU halt
+                                  (debug) and sleep. \\
+    NRF\_WDT->CRV               & Counter Reload Value — sets the timeout
+                                  period. \\
+    NRF\_WDT->RREN              & Reload Register Enable — selects which
+                                  RR[n] registers must be written to pet
+                                  the WDT. \\
+    NRF\_WDT->TASKS\_START      & Write 1 to start the WDT (irreversible
+                                  without reset). \\
+    NRF\_WDT->RR[0]             & Reload Register 0 — write
+                                  \texttt{WDT\_RR\_RR\_Reload} (0x6E524635)
+                                  to reset the counter. \\
+    NRF\_POWER->RESETREAS       & Bitmask of last reset cause; bit
+                                  \texttt{DOG} indicates a WDT reset. \\
+    \bottomrule
+  \end{tabular}
+  \caption{nRF52840 WDT and POWER registers used in this case study.}
+\end{table}
+
+\subsection{Operational Flow}
+
+\begin{enumerate}[label=\arabic*.]
+  \item \textbf{Configure} --- Write \texttt{CONFIG}, \texttt{CRV}, and
+        \texttt{RREN} before starting.
+  \item \textbf{Start} --- Write 1 to \texttt{TASKS\_START}. The WDT
+        counter begins counting up.
+  \item \textbf{Feed} --- Application writes \texttt{WDT\_RR\_RR\_Reload} to
+        \texttt{RR[0]} before the counter reaches \texttt{CRV}, resetting it
+        to zero.
+  \item \textbf{Timeout} --- If the counter reaches \texttt{CRV} without a
+        feed, the WDT asserts a system reset.
+  \item \textbf{Detect} --- On reboot, firmware checks \texttt{RESETREAS.DOG}
+        to determine if a WDT reset occurred, then clears the register.
+\end{enumerate}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Code Listing}
+% ─────────────────────────────────────────────────────────────────────────────
+
+The complete Arduino sketch is reproduced below with inline commentary.
+
+\subsection{WDT Configuration and Feed Functions}
+
+\begin{lstlisting}[caption={WDT configuration (\texttt{configureWDT}) and feed
+  (\texttt{feedWDT}) functions.}]
+#include <nrf.h>
+
+#define WDT_TIMEOUT_MS   3000
+#define FEED_INTERVAL_MS 1000
+#define HANG_AFTER_FEEDS 10
+
+uint32_t feedCount = 0;
+
+void configureWDT(uint32_t timeoutMs) {
+  // Pause WDT on debug halt; keep running during CPU sleep
+  NRF_WDT->CONFIG = (WDT_CONFIG_HALT_Pause << WDT_CONFIG_HALT_Pos)
+                  | (WDT_CONFIG_SLEEP_Run  << WDT_CONFIG_SLEEP_Pos);
+  // Set timeout: CRV = (ms * 32768) / 1000
+  NRF_WDT->CRV = (timeoutMs * 32768ULL) / 1000;
+  // Enable reload register 0
+  NRF_WDT->RREN |= WDT_RREN_RR0_Msk;
+  // Start WDT (cannot be stopped without reset)
+  NRF_WDT->TASKS_START = 1;
+}
+
+void feedWDT() {
+  NRF_WDT->RR[0] = WDT_RR_RR_Reload;
+}
+\end{lstlisting}
+
+\subsection{Reset Reason Detection}
+
+\begin{lstlisting}[caption={Reading and clearing the \texttt{RESETREAS}
+  register.}]
+bool wasResetByWDT() {
+  return (NRF_POWER->RESETREAS & POWER_RESETREAS_DOG_Msk) != 0;
+}
+
+void clearResetReason() {
+  // Write-1-to-clear: write current value back to clear all set bits
+  NRF_POWER->RESETREAS = NRF_POWER->RESETREAS;
+}
+\end{lstlisting}
+
+\subsection{setup() and loop()}
+
+\begin{lstlisting}[caption={\texttt{setup()} initialises the WDT and reports
+  the boot reason; \texttt{loop()} feeds the WDT and simulates a hang.}]
+void setup() {
+  Serial.begin(115200);
+  while (!Serial && millis() < 3000);
+  pinMode(LED_BUILTIN, OUTPUT);
+
+  Serial.println("=========================================");
+  Serial.println(" Nano 33 BLE Sense - WDT Case Study Demo ");
+  Serial.println("=========================================");
+
+  if (wasResetByWDT()) {
+    Serial.println(">>> SYSTEM RECOVERED FROM A WATCHDOG RESET! <<<");
+    Serial.println(">>> WDT functionality CONFIRMED working.    <<<");
+    for (int i = 0; i < 10; i++) {
+      digitalWrite(LED_BUILTIN, HIGH); delay(100);
+      digitalWrite(LED_BUILTIN, LOW);  delay(100);
+    }
+  } else {
+    Serial.println("Normal power-on / manual reset detected.");
+  }
+
+  clearResetReason();
+  configureWDT(WDT_TIMEOUT_MS);
+  Serial.println("WDT configured with 3000 ms timeout.");
+  Serial.println("Feeding WDT every 1000 ms...");
+}
+
+void loop() {
+  feedWDT();
+  feedCount++;
+
+  digitalWrite(LED_BUILTIN, HIGH);
+  delay(150);
+  digitalWrite(LED_BUILTIN, LOW);
+
+  Serial.print("WDT fed. Count = ");
+  Serial.println(feedCount);
+
+  if (feedCount >= HANG_AFTER_FEEDS) {
+    Serial.println("Simulating firmware hang (infinite loop)...");
+    Serial.println("WDT will NOT be fed from this point onward.");
+    Serial.println("System will auto-reset in ~3 seconds.");
+    Serial.flush();
+    while (1) { /* deliberate hang — no feedWDT() */ }
+  }
+
+  delay(FEED_INTERVAL_MS - 150);
+}
+\end{lstlisting}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Expected Serial Monitor Output}
+% ─────────────────────────────────────────────────────────────────────────────
+
+\begin{lstlisting}[language={}, caption={Serial Monitor output showing the
+  full hang-reset-recovery cycle.}, basicstyle=\ttfamily\footnotesize]
+=========================================
+ Nano 33 BLE Sense - WDT Case Study Demo
+=========================================
+Normal power-on / manual reset detected.
+WDT configured with 3000 ms timeout.
+Feeding WDT every 1000 ms...
+-----------------------------------------
+WDT fed. Count = 1
+WDT fed. Count = 2
+WDT fed. Count = 3
+WDT fed. Count = 4
+WDT fed. Count = 5
+WDT fed. Count = 6
+WDT fed. Count = 7
+WDT fed. Count = 8
+WDT fed. Count = 9
+WDT fed. Count = 10
+-----------------------------------------
+Simulating firmware hang (infinite loop)...
+WDT will NOT be fed from this point onward.
+System will auto-reset in ~3 seconds.
+
+--- [ ~3 s pause ... WDT fires ... board resets ] ---
+
+=========================================
+ Nano 33 BLE Sense - WDT Case Study Demo
+=========================================
+>>> SYSTEM RECOVERED FROM A WATCHDOG RESET! <<<
+>>> WDT functionality CONFIRMED working.    <<<
+WDT configured with 3000 ms timeout.
+Feeding WDT every 1000 ms...
+-----------------------------------------
+WDT fed. Count = 1
+...
+\end{lstlisting}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Observations}
+% ─────────────────────────────────────────────────────────────────────────────
+
+\begin{enumerate}[label=\arabic*.]
+  \item \textbf{Normal Operation (feeds 1–10):}  
+        The LED produces a clean single blink per second. Each feed resets the
+        WDT counter well within the 3-second window. No reset occurs.
+
+  \item \textbf{Simulated Hang:}  
+        After feed \#10, the sketch enters \texttt{while(1)} and the LED
+        freezes in the OFF state. The Serial Monitor shows the last three
+        diagnostic messages then falls silent.
+
+  \item \textbf{WDT-Triggered Reset ($\approx$3\,s after hang):}  
+        The board resets autonomously without any user interaction. The USB-CDC
+        Serial connection briefly drops and reconnects.
+
+  \item \textbf{Recovery Detection:}  
+        On the second boot, \texttt{POWER→RESETREAS.DOG} is set. The sketch
+        correctly identifies the WDT reset and emits the recovery banner.
+
+  \item \textbf{Rapid Blink:}  
+        The LED blinks 10 times at 100\,ms intervals — a distinctive pattern
+        that visually confirms autonomous fault recovery.
+
+  \item \textbf{Cycle Repeats:}  
+        Because the sketch always simulates a hang after 10 feeds, the
+        hang-reset-recovery cycle continues indefinitely, making this an
+        effective live demonstration.
+\end{enumerate}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Statement of Results}
+% ─────────────────────────────────────────────────────────────────────────────
+
+The experiment conclusively demonstrates that:
+
+\begin{itemize}
+  \item The nRF52840 hardware WDT can be configured and exercised through
+        bare-metal register writes inside the Arduino Mbed OS environment
+        without any third-party libraries.
+  \item A 3-second WDT timeout fires reliably when the application stops
+        feeding the WDT, producing an autonomous system reset.
+  \item The \texttt{POWER→RESETREAS} register accurately reports the WDT
+        reset cause, enabling firmware to implement graceful post-fault
+        recovery logic.
+\end{itemize}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Real-World Applications}
+% ─────────────────────────────────────────────────────────────────────────────
+
+\begin{description}
+  \item[Remote IoT Nodes] Sensors deployed in remote locations cannot be
+    manually reset. A WDT ensures they recover from transient software faults
+    and resume data transmission without human intervention.
+
+  \item[Medical Devices] Regulatory standards (IEC 62304) mandate that
+    safety-critical software include fault-detection mechanisms. A hardware WDT
+    provides a last-resort recovery independent of the software stack.
+
+  \item[Industrial Automation] PLCs and motion controllers must continue
+    operating (or fail safely) despite software errors. WDTs guard against
+    lockups in time-critical control loops.
+
+  \item[Wearables and Consumer Electronics] Battery-powered devices that
+    experience rare software hangs can recover silently, improving perceived
+    reliability and user experience.
+
+  \item[Aerospace and Automotive (ASIL/DAL-rated firmware)] WDTs are a
+    mandatory safety mechanism in automotive (ISO 26262) and aerospace systems
+    to meet fault-tolerance requirements.
+\end{description}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Conclusion}
+% ─────────────────────────────────────────────────────────────────────────────
+
+This case study successfully demonstrated the end-to-end operation of the
+hardware Watchdog Timer on the nRF52840 SoC using the Arduino Nano 33 BLE
+Sense. Through direct register manipulation — without relying on high-level
+Arduino abstractions — the WDT was configured with a 3-second timeout,
+periodically fed during normal operation, and proven to trigger an autonomous
+reset when the simulated firmware hang prevented further feeding. Post-reset
+detection via \texttt{POWER→RESETREAS} confirmed the exact cause of the reset,
+illustrating a complete fault-detection and recovery cycle.
+
+The technique presented here is directly applicable to production embedded
+firmware. A 3-line addition to any \texttt{loop()} and a startup check of
+\texttt{RESETREAS} can dramatically improve the resilience of any nRF52840-based
+product with minimal code overhead.
+
+\vspace{1em}
+\noindent\rule{\linewidth}{0.4pt}
+
+\begin{center}
+  \textit{Case study prepared by \textbf{Akanksh Batra} --- 2026}\\
+  Repository: \url{https://github.com/ak4204/nano33ble-wdt-case-study}
+\end{center}
+
+\end{document}
