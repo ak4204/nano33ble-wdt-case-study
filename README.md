@@ -1,9 +1,10 @@
-# Watchdog Timer (WDT) Case Study — Arduino Nano 33 BLE Sense
+# EEE-RTOS Experiments - Arduino Nano 33 BLE Sense
 
 ![Arduino](https://img.shields.io/badge/Arduino-Nano%2033%20BLE%20Sense-00979D?logo=arduino&logoColor=white)
 ![SoC](https://img.shields.io/badge/SoC-nRF52840-0077C8?logo=nordic-semiconductor&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
 
+> **Subject:** EEE-RTOS (Experiments 1 to 20)  
 > **Author:** Akanksh Batra  
 > **Platform:** Arduino Nano 33 BLE Sense (Nordic Semiconductor nRF52840)  
 > **Core:** Mbed OS Nano Boards (Arduino IDE 2.x)
@@ -144,14 +145,32 @@ WDT fed. Count = 1
 
 ```
 nano33ble-wdt-case-study/
-├── WDT_Nano33BLE/
-│   └── WDT_Nano33BLE.ino   ← Arduino sketch (main demo)
+├── Experiment_1.cpp      ← Configuration Blank Sketch
+├── Experiment_2.cpp      ← Built-in LED Blink
+├── Experiment_3.cpp      ← Print "Hello World"
+├── Experiment_4.cpp      ← Turn on RGB LED
+├── Experiment_5.cpp      ← Accelerometer Waveform
+├── Experiment_6.cpp      ← Gyroscope Waveform
+├── Experiment_7.cpp      ← IMU Tilt Labels
+├── Experiment_8.cpp      ← IMU Tilt LED
+├── Experiment_9.cpp      ← Analog Input
+├── Experiment_10.cpp     ← I2C Grove LCD
+├── Experiment_11.cpp     ← Gesture Detection
+├── Experiment_12.cpp     ← Streaming Gesture Data
+├── Experiment_13.cpp     ← Proximity LED
+├── Experiment_14.cpp     ← Digital Microphone
+├── Experiment_15.cpp     ← Sound Threshold LED
+├── Experiment_16.cpp     ← Bare-Metal Timer Interrupt
+├── Experiment_17.cpp     ← Bare-Metal Timer Counter
+├── Experiment_18.cpp     ← RTOS Demo
+├── Experiment_19.cpp     ← BLE Communication
+├── Experiment_20.cpp     ← BLE RGB Control
 ├── docs/
-│   └── case_study.tex       ← Case study write-up
+│   └── case_study.tex    ← Case study write-up
 ├── media/
 │   └── .gitkeep
 ├── README.md
-└── LICENSE                  ← MIT License
+└── LICENSE               ← MIT License
 ```
 
 ---
